@@ -4,12 +4,12 @@
     "description": "The Umbrella API was released in September 2022, providing a user-friendly and secure platform that enables users to build on, extend, and integrate with Umbrella. It facilitates the creation of multiple cross-platform workflows aggregating our market-leading threat intelligence with other security solutions to expand security enforcement, broaden visibility, and automate incident response",
     "type": "network security",
     "product_vendor": "Cisco",
-    "logo": "umbrellav2.png",
-    "logo_dark": "umbrellav2_dark.png",
+    "logo": "logo_umbrellav2.svg",
+    "logo_dark": "logo_umbrellav2_dark.svg",
     "product_name": "Umbrella",
-    "python_version": "3",
+    "python_version": "3.9, 3.13",
     "product_version_regex": ".*",
-    "publisher": "Splunk Community",
+    "publisher": "Splunk",
     "license": "Copyright (c) Community, 2024-2025",
     "app_version": "3.4.0",
     "utctime_updated": "2024-10-29T19:16:46.678789Z",
@@ -29,11 +29,6 @@
             "data_type": "password",
             "required": true,
             "order": 1
-        },
-        "list_ids_for_on_poll": {
-            "description": "Comma-separated list of Umbrella List IDs to ingest when 'on poll' is executed",
-            "data_type": "string",
-            "order": 2
         }
     },
     "actions": [
@@ -177,16 +172,6 @@
             "render": {
                 "type": "table"
             },
-            "versions": "EQ(*)"
-        },
-        {
-            "action": "on poll",
-            "identifier": "on_poll",
-            "description": "List Ingestion",
-            "type": "ingest",
-            "read_only": false,
-            "parameters": {},
-            "output": [],
             "versions": "EQ(*)"
         }
     ]

@@ -1,6 +1,6 @@
 # Umbrella v2
 
-Publisher: Splunk Community <br>
+Publisher: Splunk <br>
 Connector Version: 3.4.0 <br>
 Product Vendor: Cisco <br>
 Product Name: Umbrella <br>
@@ -16,14 +16,12 @@ VARIABLE | REQUIRED | TYPE | DESCRIPTION
 -------- | -------- | ---- | -----------
 **api_key** | required | password | Umbrella API Key |
 **key_secret** | required | password | Umbrella Key Secret |
-**list_ids_for_on_poll** | optional | string | Comma-separated list of Umbrella List IDs to ingest when 'on poll' is executed |
 
 ### Supported Actions
 
 [test connectivity](#action-test-connectivity) - Validate the asset configuration for connectivity using supplied configuration <br>
 [get lists](#action-get-lists) - Get all the destination lists in your organization <br>
-[get destinations](#action-get-destinations) - Get destinations in a destination list <br>
-[on poll](#action-on-poll) - List Ingestion
+[get destinations](#action-get-destinations) - Get destinations in a destination list
 
 ## action: 'test connectivity'
 
@@ -91,21 +89,6 @@ action_result.status | string | | success failed |
 action_result.message | string | | |
 summary.total_objects | numeric | | |
 summary.total_objects_successful | numeric | | |
-
-## action: 'on poll'
-
-List Ingestion
-
-Type: **ingest** <br>
-Read only: **False**
-
-#### Action Parameters
-
-No parameters are required for this action
-
-#### Action Output
-
-No Output
 
 ______________________________________________________________________
 

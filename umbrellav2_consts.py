@@ -11,13 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# Define your constants here
+
+# API Configuration
 DEFAULT_REQUEST_TIMEOUT = 30  # in seconds
 HTTP_JSON_ACCESS_TOKEN = "access_token"
 OAUTH_TOKEN_URI = "/auth/v2/token"
 
-UMBRELLA_ERROR_MSG = "Unknown error occurred. Please check the asset configuration and|or action parameters"
+# Error Messages
+UMBRELLA_ERROR_MSG = (
+    "Unknown error occurred. Please check the asset configuration "
+    "and/or action parameters"
+)
 
+# API Base URL and Endpoints
 UMBRELLA_BASE_URL = "https://api.umbrella.com"
 UMBRELLA_POLICIES_DESTINATION_LISTS = "/policies/v2/destinationlists"
 UMBRELLA_POLICIES_DESTINATION_LIST_ID = (

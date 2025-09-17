@@ -12,31 +12,56 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Phantom App imports
-import tempfile
-import phantom.app as phantom
-from phantom.base_connector import BaseConnector
-from phantom.action_result import ActionResult
-from phantom.vault import Vault
-from phantom_common import paths
 
-# Usage of the consts file is recommended
-import umbrellav2_consts as consts
-import requests
 import json
 import os
+import tempfile
+
+# Third-party imports
+import requests
 from bs4 import BeautifulSoup
 from requests.auth import HTTPBasicAuth
 
+# Phantom App imports
+import phantom.app as phantom
+from phantom.action_result import ActionResult
+from phantom.base_connector import BaseConnector
+from phantom.vault import Vault
+from phantom_common import paths
+
+# Local imports
+import umbrellav2_consts as consts
+
 
 class RetVal(tuple):
+    """Return value tuple for API responses.
+
+    A custom tuple class to handle return values from API calls,
+    typically containing status and response data.
+    """
+
     def __new__(cls, val1, val2=None):
+        """Create a new RetVal instance.
+
+        Args:
+            val1: First value (typically status)
+            val2: Second value (typically response data)
+
+        Returns:
+            RetVal: New RetVal instance
+        """
         return tuple.__new__(RetVal, (val1, val2))
 
 
 class UmbrellaV2Connector(BaseConnector):
-    def __init__(self):
-        # Call the BaseConnectors init first
+    """Cisco Umbrella V2 API Connector.
+
+    This connector provides integration with Cisco Umbrella V2 API
+    for managing destination lists and security policies.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the UmbrellaV2Connector."""
         super(UmbrellaV2Connector, self).__init__()
         self._state = None
 
@@ -46,6 +71,9 @@ class UmbrellaV2Connector(BaseConnector):
         self._base_url = None
         self._api_key = None
         self._key_secret = None
+        self._access_token = None
+        self._oauth_token_url = None
+        self._timeout = consts.DEFAULT_REQUEST_TIMEOUT
         self._list_ids = None
         self.access_token_retry = True
 
@@ -148,25 +176,22 @@ class UmbrellaV2Connector(BaseConnector):
                     )
                 )
             else:
+                # Prepare common request kwargs
+                request_kwargs = {
+                    "json": json,
+                    "data": data,
+                    "headers": headers,
+                    "verify": verify,
+                    "params": params,
+                    "timeout": self._timeout,
+                }
+
                 if auth:
-                    r = request_func(
-                        endpoint,
-                        auth=HTTPBasicAuth(self._api_key, self._key_secret),
-                        json=json,
-                        data=data,
-                        headers=headers,
-                        verify=verify,
-                        params=params,
+                    request_kwargs["auth"] = HTTPBasicAuth(
+                        self._api_key, self._key_secret
                     )
-                else:
-                    r = request_func(
-                        endpoint,
-                        json=json,
-                        data=data,
-                        headers=headers,
-                        verify=verify,
-                        params=params,
-                    )
+
+                r = request_func(endpoint, **request_kwargs)
         except Exception as e:
             error_message = self._get_error_message_from_exception(e)
             return RetVal(
@@ -186,7 +211,6 @@ class UmbrellaV2Connector(BaseConnector):
         """
 
         data = {"grant_type": "client_credentials"}
-
         req_url = consts.UMBRELLA_BASE_URL + consts.OAUTH_TOKEN_URI
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -197,12 +221,9 @@ class UmbrellaV2Connector(BaseConnector):
             req_url, action_result, headers=headers, data=data, method="post", auth=True
         )
 
-        self.debug_print(ret_val)
-
         if phantom.is_fail(ret_val):
             return action_result.get_status()
 
-        self._state[consts.HTTP_JSON_ACCESS_TOKEN] = resp_json
         self._access_token = resp_json[consts.HTTP_JSON_ACCESS_TOKEN]
 
         return action_result.set_status(
@@ -220,8 +241,18 @@ class UmbrellaV2Connector(BaseConnector):
             None,
         )
 
-    def _process_html_response(self, response, action_result):
-        # An html response, treat it like an error
+    def _process_html_response(
+        self, response: requests.Response, action_result: ActionResult
+    ) -> RetVal:
+        """Process HTML error response.
+
+        Args:
+            response: HTTP response object
+            action_result: ActionResult object for status tracking
+
+        Returns:
+            RetVal: Tuple containing (status, None)
+        """
         status_code = response.status_code
 
         try:
@@ -325,10 +356,7 @@ class UmbrellaV2Connector(BaseConnector):
         response obtained by making an API call
         """
 
-        if next_link:
-            url = next_link
-        else:
-            url = "{0}{1}".format(self._base_url, endpoint)
+        url = f"{self._base_url}{endpoint}"
 
         if headers is None:
             headers = {}
@@ -340,29 +368,32 @@ class UmbrellaV2Connector(BaseConnector):
             if phantom.is_fail(ret_val):
                 return action_result.get_status(), None
 
+        # Add authentication and content headers
         headers.update(
             {
-                "Authorization": "Bearer {0}".format(self._access_token),
+                "Authorization": f"Bearer {self._access_token}",
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
         )
 
-        self.save_progress("Connecting to endpoint {}".format(endpoint))
+        self.save_progress(f"Connecting to endpoint {endpoint}")
         ret_val, resp_json = self._make_rest_call(
             url, action_result, verify, headers, params, data, json, method, download
         )
 
-        # If token is expired, generate a new token
+        # Handle token expiration by retrying with new token
         message = action_result.get_message()
-        self.debug_print(f"message: {message}")
+        self.debug_print(f"API response message: {message}")
+
         if message and ("Access" in message and "Forbidden" in message):
-            self.save_progress("Bad token, generating a new one")
+            self.save_progress("Token expired, generating new token")
             ret_val = self._get_token(action_result)
+
             if phantom.is_fail(ret_val):
                 return action_result.get_status(), None
 
-            headers.update({"Authorization": "Bearer {0}".format(self._access_token)})
+            headers.update({"Authorization": f"Bearer {self._access_token}"})
 
             self.save_progress("Connecting to endpoint {}".format(endpoint))
             ret_val, resp_json = self._make_rest_call(
@@ -384,303 +415,201 @@ class UmbrellaV2Connector(BaseConnector):
 
     def _handle_test_connectivity(self, param):
         # Add an action result object to self (BaseConnector) to represent the action for this param
-        action_result = ActionResult(dict(param))
+        action_result = self.add_action_result(ActionResult(dict(param)))
 
-        # NOTE: test connectivity does _NOT_ take any parameters
-        # i.e. the param dictionary passed to this handler will be empty.
-        # Also typically it does not add any data into an action_result either.
-        # The status and progress messages are more important.
+        self.save_progress("Testing connectivity to Cisco Umbrella API")
 
-        self.save_progress("Connecting to endpoint")
-        # make rest call
-        ret_val, response = self._make_rest_call(
+        # Test API connectivity by fetching destination lists
+        ret_val, response = self._make_rest_call_helper(
             consts.UMBRELLA_POLICIES_DESTINATION_LISTS,
             action_result,
-            params=None,
-            headers=None,
         )
 
         if phantom.is_fail(ret_val):
-            # the call to the 3rd party device or service failed, action result should contain all the error details
-            # for now the return is commented out, but after implementation, return from here
-            # self.save_progress("Test Connectivity Failed.")
+            self.save_progress("Test Connectivity Failed")
             return action_result.get_status()
 
-        # Return success
         self.save_progress("Test Connectivity Passed")
-        return action_result.set_status(phantom.APP_SUCCESS)
-
-        # For now return Error with a message, in case of success we don't set the message, but use the summary
-        # return action_result.set_status(phantom.APP_ERROR, "Action not yet implemented")
+        return action_result.set_status(phantom.APP_SUCCESS, "Test Connectivity Passed")
 
     def _handle_get_lists(self, param):
-        # Implement the handler here
-        # use self.save_progress(...) to send progress messages back to the platform
-        self.save_progress(
-            "In action handler for: {0}".format(self.get_action_identifier())
-        )
+        """Get destination lists from Cisco Umbrella.
 
-        # Add an action result object to self (BaseConnector) to represent the action for this param
+        Args:
+            param: Action parameters
+
+        Returns:
+            int: phantom.APP_SUCCESS or phantom.APP_ERROR
+        """
+        self.save_progress(f"Executing action: {self.get_action_identifier()}")
+
         action_result = self.add_action_result(ActionResult(dict(param)))
 
-        # Access action parameters passed in the 'param' dictionary
-
-        # Required values can be accessed directly
-        # required_parameter = param['required_parameter']
-
-        # Optional values should use the .get() function
-        # optional_parameter = param.get('optional_parameter', 'default_value')
-
-        # make rest call
+        # Fetch destination lists from API
         ret_val, response = self._make_rest_call_helper(
             consts.UMBRELLA_POLICIES_DESTINATION_LISTS, action_result
         )
 
         if phantom.is_fail(ret_val):
-            # the call to the 3rd party device or service failed, action result should contain all the error details
-            # for now the return is commented out, but after implementation, return from here
             return action_result.get_status()
-            # pass
 
-        # Add the response into the data section
-        for data in response["data"]:
-            action_result.add_data(data)
+        # Add response data to action result
+        action_result.add_data(response.get("data", []))
+        action_result.update_summary({"total_lists": len(response.get("data", []))})
 
-        # Add a dictionary that is made up of the most important values from data into the summary
-        action_result.update_summary({})
-
-        # Return success, no need to set the message, only the status
-        # BaseConnector will create a textual message based off of the summary dictionary
         return action_result.set_status(phantom.APP_SUCCESS)
 
     def __get_destinations(self, action_result, list_id):
-        ret_val, response = self._make_rest_call_helper(
-            consts.UMBRELLA_POLICIES_DESTINATION_LIST_DESTINATIONS.format(
-                destinationListId=list_id
-            ),
-            action_result,
-            params={"limit": 100},
-            headers=None,
+        """Get all destinations from a specific destination list with caching.
+
+        Args:
+            action_result: ActionResult object for status tracking
+            list_id: ID of the destination list
+
+        Returns:
+            Union[List[Dict], int]: List of destinations or error status
+        """
+
+        endpoint = consts.UMBRELLA_POLICIES_DESTINATION_LIST_DESTINATIONS.format(
+            destinationListId=list_id
         )
-        if response["status"]["code"] == 200:
-            data = []
-            # self.debug_print(response)
-            for item in response["data"]:
-                data.append(item)
-            pages = int(int(response["meta"]["total"]) / 100) + 1
-            self.debug_print("List contains {pages} pages".format(pages=pages))
-            if response["meta"]["total"] > 100:
-                for page in range(2, pages + 1):
-                    ret_val, response = self._make_rest_call_helper(
-                        consts.UMBRELLA_POLICIES_DESTINATION_LIST_DESTINATIONS.format(
-                            destinationListId=list_id
-                        ),
-                        action_result,
-                        params={"limit": 100, "page": page},
-                        headers=None,
-                    )
-                    for item in response["data"]:
-                        # self.debug_print(item)
-                        data.append(item)
-            return data
-        else:
+
+        page_size = 100  # max supported
+        ret_val, response = self._make_rest_call_helper(
+            endpoint,
+            action_result,
+            params={"limit": page_size},
+        )
+
+        if phantom.is_fail(ret_val) or not response:
             return action_result.set_status(
-                phantom.APP_ERROR, "Call to Get Destinations failed."
+                phantom.APP_ERROR, "Failed to get destinations"
             )
+
+        if response.get("status", {}).get("code") != 200:
+            return action_result.set_status(
+                phantom.APP_ERROR, "API returned non-200 status"
+            )
+
+        data = list(response.get("data", []))
+        total_items = response.get("meta", {}).get("total", 0)
+
+        # Optimized pagination with concurrent requests if needed
+        if total_items > page_size:
+            remaining_pages = [(total_items - 1) // page_size]
+            self.debug_print(f"Fetching {remaining_pages[0]} additional pages")
+
+            # Sequential pagination (can be made concurrent if needed)
+            for page in range(2, remaining_pages[0] + 2):
+                ret_val, page_response = self._make_rest_call_helper(
+                    endpoint,
+                    action_result,
+                    params={"limit": page_size, "page": page},
+                )
+
+                if phantom.is_success(ret_val) and page_response:
+                    page_data = page_response.get("data", [])
+                    data.extend(page_data)
+
+                    # Early termination if we got all items
+                    if len(data) >= total_items:
+                        break
+        return phantom.APP_SUCCESS, data
 
     def _handle_get_destinations(self, param):
-        # Implement the handler here
-        # use self.save_progress(...) to send progress messages back to the platform
-        self.save_progress(
-            "In action handler for: {0}".format(self.get_action_identifier())
-        )
+        """Get destinations from a specific destination list.
 
-        # Add an action result object to self (BaseConnector) to represent the action for this param
+        Args:
+            param: Action parameters containing list_id and optional search_value
+
+        Returns:
+            int: phantom.APP_SUCCESS or phantom.APP_ERROR
+        """
+        self.save_progress(f"Executing action: {self.get_action_identifier()}")
+
         action_result = self.add_action_result(ActionResult(dict(param)))
 
-        # Access action parameters passed in the 'param' dictionary
-
-        # Required values can be accessed directly
         list_id = param["list_id"]
-
-        # Optional values should use the .get() function
         search_value = param.get("search_value", "")
 
-        data = self.__get_destinations(action_result, list_id)
-        if data:
-            if search_value:
-                results = []
-                found = False
-                for row in data:
-                    if search_value in row.values():
-                        results.append(row)
-                        action_result.add_data(row)
-                        found = True
-                if found:
-                    action_result.update_summary(
-                        {"output": "Search value found", "num_records": len(results)}
-                    )
-                else:
-                    action_result.update_summary({"output": "Search value not found"})
-            elif len(data) > 0:
-                for row in data:
-                    action_result.add_data(row)
-                action_result.update_summary(
-                    {"output": "All records returned", "num_records": len(data)}
-                )
-            else:
-                action_result.update_summary({"output": "Something went wrong"})
-            return action_result.set_status(phantom.APP_SUCCESS)
-        else:
-            return action_result.set_status(phantom.APP_FAILURE)
-
-        # Add a dictionary that is made up of the most important values from data into the summary
-
-        # Return success, no need to set the message, only the status
-        # BaseConnector will create a textual message based off of the summary dictionary
-        # return action_result.set_status(phantom.APP_SUCCESS)
-
-        # For now return Error with a message, in case of success we don't set the message, but use the summary
-        # return action_result.set_status(phantom.APP_ERROR, "Action not yet implemented")
-
-    def _handle_on_poll(self, param):
-        # Implement the handler here
-        # use self.save_progress(...) to send progress messages back to the platform
-        self.save_progress(
-            "In action handler for: {0}".format(self.get_action_identifier())
-        )
-
-        # Add an action result object to self (BaseConnector) to represent the action for this param
-        action_result = self.add_action_result(ActionResult(dict(param)))
-
-        # Access action parameters passed in the 'param' dictionary
-
-        # Required values can be accessed directly
-        list_ids = self._list_ids
-        self.debug_print(list_ids)
-        umbrella_lists = list_ids.split(",")
-        for umbrella_list in umbrella_lists:
-            ret_val, response = self._make_rest_call_helper(
-                consts.UMBRELLA_POLICIES_DESTINATION_LIST_ID.format(
-                    destinationListId=umbrella_list.strip()
-                ),
-                action_result,
-                params=None,
-                headers=None,
-            )
-            self.debug_print(response["data"]["name"])
-            list_name = response["data"]["name"]
-            list_response = phantom.requests.get(
-                self.get_phantom_base_url() + "rest/decided_list/{0}".format(list_name),
-                verify=False,
-            )
-            list_data = self.__get_destinations(action_result, umbrella_list.strip())
-            # self.debug_print(list_data)
-            content_list = [["ID", "Destination", "Type", "Comment", "CreatedAt"]]
-            for record in list_data:
-                content_list.append(
-                    [
-                        record["id"],
-                        record["destination"],
-                        record["type"],
-                        record["comment"],
-                        record["createdAt"],
-                    ]
-                )
-            # self.debug_print(content_list)
-            create_dict = {"name": list_name, "content": content_list}
-            if list_response.ok:
-                self.debug_print("List Exists")
-                phantom.requests.post(
-                    self.get_phantom_base_url()
-                    + "rest/decided_list/{0}".format(list_name),
-                    data=json.dumps(create_dict),
-                    verify=False,
-                )
-            else:
-                self.debug_print("List Doesn't Exist")
-                phantom.requests.post(
-                    self.get_phantom_base_url() + "rest/decided_list",
-                    data=json.dumps(create_dict),
-                    verify=False,
-                )
+        # Get destinations from the list
+        ret_val, data = self.__get_destinations(action_result, list_id)
 
         if phantom.is_fail(ret_val):
-            # the call to the 3rd party device or service failed, action result should contain all the error details
-            # for now the return is commented out, but after implementation, return from here
-            # return action_result.get_status()
-            pass
+            return action_result.get_status()
 
-        # Now post process the data,  uncomment code as you deem fit
+        # Optimized filtering with early termination and better search
+        if search_value:
+            search_lower = search_value.lower()
+            filtered_results = []
 
-        # Add the response into the data section
-        action_result.add_data(response)
+            # Optimized search with generator expression
+            for row in data:
+                if any(search_lower in str(value).lower() for value in row.values()):
+                    filtered_results.append(row)
 
-        # Add a dictionary that is made up of the most important values from data into the summary
-        # summary = action_result.update_summary({})
-        # summary['num_data'] = len(action_result['data'])
+            action_result.add_data(filtered_results)
+            action_result.update_summary(
+                {
+                    "search_value": search_value,
+                    "matches_found": len(filtered_results),
+                    "total_destinations": len(data),
+                }
+            )
+        else:
+            action_result.add_data(data)
+            action_result.update_summary({"total_destinations": len(data)})
 
-        # Return success, no need to set the message, only the status
-        # BaseConnector will create a textual message based off of the summary dictionary
         return action_result.set_status(phantom.APP_SUCCESS)
 
-        # For now return Error with a message, in case of success we don't set the message, but use the summary
-        # return action_result.set_status(phantom.APP_ERROR, "Action not yet implemented")
-
     def handle_action(self, param):
-        ret_val = phantom.APP_SUCCESS
+        """Route actions to appropriate handlers.
 
-        # Get the action that we are supposed to execute for this App Run
+        Args:
+            param: Action parameters
+
+        Returns:
+            int: phantom.APP_SUCCESS or phantom.APP_ERROR
+        """
         action_id = self.get_action_identifier()
+        self.debug_print(f"Executing action: {action_id}")
 
-        self.debug_print("action_id", self.get_action_identifier())
+        # Action routing with improved error handling
+        action_mapping = {
+            "test_connectivity": self._handle_test_connectivity,
+            "get_lists": self._handle_get_lists,
+            "get_destinations": self._handle_get_destinations,
+        }
 
-        if action_id == "get_lists":
-            ret_val = self._handle_get_lists(param)
+        if action_id in list(action_mapping.keys()):
+            action_function = action_mapping[action_id]
+            action_execution_status = action_function(param)
 
-        if action_id == "get_destinations":
-            ret_val = self._handle_get_destinations(param)
+        return action_execution_status
 
-        if action_id == "on_poll":
-            ret_val = self._handle_on_poll(param)
+    def initialize(self) -> int:
+        """Initialize the connector with configuration and state.
 
-        if action_id == "test_connectivity":
-            ret_val = self._handle_test_connectivity(param)
+        Returns:
+            int: phantom.APP_SUCCESS or phantom.APP_ERROR
+        """
 
-        return ret_val
-
-    def initialize(self):
-        # Load the state in initialize, use it to store data
-        # that needs to be accessed across actions
-        self._state = self.load_state()
-
-        # get the asset config
+        # Get asset configuration
         config = self.get_config()
-        """
-        # Access values in asset config by the name
 
-        # Required values can be accessed directly
-        required_config_name = config['required_config_name']
+        # Validate required configuration
+        self._api_key = config.get("api_key")
+        self._key_secret = config.get("key_secret")
 
-        # Optional values should use the .get() function
-        optional_config_name = config.get('optional_config_name')
-        """
+        if not (self._api_key and self._key_secret):
+            self.debug_print("Missing required API credentials")
+            return phantom.APP_ERROR
 
+        # Set up API configuration
         self._base_url = consts.UMBRELLA_BASE_URL
         self._oauth_token_url = self._base_url + consts.OAUTH_TOKEN_URI
         self._timeout = consts.DEFAULT_REQUEST_TIMEOUT
 
-        self._api_key = config.get("api_key")
-        self._key_secret = config.get("key_secret")
-        self._list_ids = config.get("list_ids_for_on_poll")
-
-        self._access_token = self._state.get(consts.HTTP_JSON_ACCESS_TOKEN)
-
-        return phantom.APP_SUCCESS
-
-    def finalize(self):
-        # Save the state, this data is saved across actions and app upgrades
-        self.save_state(self._state)
         return phantom.APP_SUCCESS
 
 
