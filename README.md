@@ -1,7 +1,7 @@
-# Umbrella v2
+# Cisco Umbrella v2
 
 Publisher: Splunk <br>
-Connector Version: 3.4.0 <br>
+Connector Version: 1.0.0 <br>
 Product Vendor: Cisco <br>
 Product Name: Umbrella <br>
 Minimum Product Version: 6.4.0
@@ -10,7 +10,7 @@ The Umbrella API was released in September 2022, providing a user-friendly and s
 
 ### Configuration variables
 
-This table lists the configuration variables required to operate Umbrella v2. These variables are specified when configuring a Umbrella asset in Splunk SOAR.
+This table lists the configuration variables required to operate Cisco Umbrella v2. These variables are specified when configuring a Umbrella asset in Splunk SOAR.
 
 VARIABLE | REQUIRED | TYPE | DESCRIPTION
 -------- | -------- | ---- | -----------
@@ -42,53 +42,77 @@ No Output
 
 Get all the destination lists in your organization
 
-Type: **generic** <br>
-Read only: **True**
-
-#### Action Parameters
-
-No parameters are required for this action
-
-#### Action Output
-
-DATA PATH | TYPE | CONTAINS | EXAMPLE VALUES
---------- | ---- | -------- | --------------
-action_result.status | string | | success failed |
-action_result.data.\*.id | numeric | | |
-action_result.data.\*.name | string | | |
-action_result.message | string | | |
-summary.total_objects | numeric | | |
-summary.total_objects_successful | numeric | | |
-
-## action: 'get destinations'
-
-Get destinations in a destination list
-
-Type: **generic** <br>
+Type: **investigate** <br>
 Read only: **True**
 
 #### Action Parameters
 
 PARAMETER | REQUIRED | DESCRIPTION | TYPE | CONTAINS
 --------- | -------- | ----------- | ---- | --------
-**list_id** | required | The unique ID of the destination list | numeric | |
-**search_value** | optional | Optional value to search for in the list | string | |
+**limit** | optional | Optional limit for number of results default all | numeric | |
 
 #### Action Output
 
 DATA PATH | TYPE | CONTAINS | EXAMPLE VALUES
 --------- | ---- | -------- | --------------
-action_result.data.\*.id | numeric | | |
-action_result.data.\*.type | string | | |
-action_result.data.\*.comment | string | | |
-action_result.data.\*.destination | string | | |
-action_result.data.\*.createdAt | string | | |
-action_result.parameter.list_id | numeric | | |
-action_result.parameter.search_value | string | | |
 action_result.status | string | | success failed |
-action_result.message | string | | |
-summary.total_objects | numeric | | |
-summary.total_objects_successful | numeric | | |
+action_result.parameter.limit | numeric | | |
+action_result.data.\*.access | string | | |
+action_result.data.\*.bundleTypeId | numeric | | |
+action_result.data.\*.createdAt | numeric | | |
+action_result.data.\*.id | numeric | `cisco umbrella destination list id` | |
+action_result.data.\*.isGlobal | boolean | | |
+action_result.data.\*.isMspDefault | boolean | | |
+action_result.data.\*.markedForDeletion | boolean | | |
+action_result.data.\*.meta.applicationCount | numeric | | |
+action_result.data.\*.meta.destinationCount | numeric | | |
+action_result.data.\*.meta.domainCount | numeric | | |
+action_result.data.\*.meta.ipv4Count | numeric | | |
+action_result.data.\*.meta.urlCount | numeric | | |
+action_result.data.\*.modifiedAt | numeric | | |
+action_result.data.\*.name | string | | |
+action_result.data.\*.organizationId | numeric | | |
+action_result.data.\*.thirdpartyCategoryId | string | | |
+action_result.summary.total_lists | numeric | | |
+action_result.message | string | | Total lists: 5 |
+summary.total_objects | numeric | | 1 |
+summary.total_objects_successful | numeric | | 1 |
+
+## action: 'get destinations'
+
+Get destinations in a destination list
+
+Type: **investigate** <br>
+Read only: **True**
+
+#### Action Parameters
+
+PARAMETER | REQUIRED | DESCRIPTION | TYPE | CONTAINS
+--------- | -------- | ----------- | ---- | --------
+**list_id** | required | The unique ID of the destination list | numeric | `cisco umbrella destination list id` |
+**search_value** | optional | Optional value to search for in the list | string | |
+**limit** | optional | Optional limit for number of results default all | numeric | |
+
+#### Action Output
+
+DATA PATH | TYPE | CONTAINS | EXAMPLE VALUES
+--------- | ---- | -------- | --------------
+action_result.status | string | | success failed |
+action_result.parameter.limit | numeric | | |
+action_result.parameter.list_id | numeric | `cisco umbrella destination list id` | 18474698 |
+action_result.parameter.search_value | string | | test |
+action_result.data | string | | |
+action_result.data.\*.comment | string | | |
+action_result.data.\*.createdAt | string | | 2025-09-12 12:31:30 |
+action_result.data.\*.destination | string | | www.whatsapp.com |
+action_result.data.\*.id | string | `cisco umbrella destination id` | 3534477 |
+action_result.data.\*.type | string | | domain |
+action_result.summary.matches_found | numeric | | |
+action_result.summary.search_value | string | | |
+action_result.summary.total_destinations | numeric | | |
+action_result.message | string | | Search value: hotstar, Matches found: 1, Total destinations: 2 Total destinations: 2 |
+summary.total_objects | numeric | | 1 |
+summary.total_objects_successful | numeric | | 1 |
 
 ______________________________________________________________________
 

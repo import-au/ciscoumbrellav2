@@ -14,8 +14,7 @@
 
 
 import json
-import os
-import tempfile
+import time
 
 # Third-party imports
 import requests
@@ -26,11 +25,10 @@ from requests.auth import HTTPBasicAuth
 import phantom.app as phantom
 from phantom.action_result import ActionResult
 from phantom.base_connector import BaseConnector
-from phantom.vault import Vault
-from phantom_common import paths
 
 # Local imports
 import umbrellav2_consts as consts
+import encryption_helper
 
 
 class RetVal(tuple):
@@ -62,7 +60,7 @@ class UmbrellaV2Connector(BaseConnector):
 
     def __init__(self) -> None:
         """Initialize the UmbrellaV2Connector."""
-        super(UmbrellaV2Connector, self).__init__()
+        super().__init__()
         self._state = None
 
         # Variable to hold a base_url in case the app makes REST calls
@@ -74,8 +72,7 @@ class UmbrellaV2Connector(BaseConnector):
         self._access_token = None
         self._oauth_token_url = None
         self._timeout = consts.DEFAULT_REQUEST_TIMEOUT
-        self._list_ids = None
-        self.access_token_retry = True
+        self._token_expiry_time = None
 
     def _get_error_message_from_exception(self, e):
         """This method is used to get appropriate error message from the exception.
@@ -103,95 +100,58 @@ class UmbrellaV2Connector(BaseConnector):
         self,
         endpoint,
         action_result,
-        verify=True,
         headers=None,
-        params=None,
         data=None,
-        json=None,
         method="get",
-        download=False,
         auth=False,
+        **kwargs,
     ):
         """Function that makes the REST call to the app.
-        :param endpoint: REST endpoint that needs to appended to the service address
-        :param action_result: object of ActionResult class
-        :param verify: verify server certificate (Default True)
-        :param headers: request headers
-        :param params: request parameters
-        :param data: request body
-        :param json: JSON object
-        :param method: GET/POST/PUT/DELETE/PATCH (Default will be GET)
-        :param download: use streaming for the file download to handle large files
-        :return: status phantom.APP_ERROR/phantom.APP_SUCCESS(along with appropriate message),
-        response obtained by making an API call
+
+        Args:
+            endpoint: REST endpoint URL
+            action_result: ActionResult object for status tracking
+            headers: Request headers (optional)
+            data: Request body data (optional)
+            method: HTTP method (default "get")
+            auth: Use basic authentication (default False)
+            **kwargs: Additional parameters (params, json, verify, etc.)
+
+        Returns:
+            RetVal: Tuple containing (status, response)
         """
-
-        resp_json = None
-
         try:
-            request_func = getattr(requests, method)
+            request_func = getattr(requests, method.lower())
         except AttributeError:
             return RetVal(
                 action_result.set_status(
-                    phantom.APP_ERROR, "Invalid method: {0}".format(method)
+                    phantom.APP_ERROR, f"Invalid HTTP method: {method}"
                 ),
-                resp_json,
+                None,
             )
 
+        # Prepare request arguments
+        request_kwargs = {
+            "headers": headers,
+            "data": data,
+            "timeout": self._timeout,
+            "verify": kwargs.get("verify", True),
+        }
+
+        # Add optional parameters from kwargs
+        if "params" in kwargs:
+            request_kwargs["params"] = kwargs["params"]
+        if "json" in kwargs:
+            request_kwargs["json"] = kwargs["json"]
+
+        if auth:
+            request_kwargs["auth"] = HTTPBasicAuth(self._api_key, self._key_secret)
+
         try:
-            if download:
-                if hasattr(Vault, "get_vault_tmp_dir"):
-                    fd, tmp_file_path = tempfile.mkstemp(dir=Vault.get_vault_tmp_dir())
-                else:
-                    vault_tmp = os.path.join(paths.PHANTOM_VAULT, "tmp")
-                    fd, tmp_file_path = tempfile.mkstemp(dir=vault_tmp)
-                os.close(fd)
-                if auth:
-                    r = request_func(
-                        endpoint,
-                        auth=HTTPBasicAuth(self._api_key, self._key_secret),
-                        json=json,
-                        data=data,
-                        headers=headers,
-                        params=params,
-                        stream=True,
-                    )
-                else:
-                    r = request_func(
-                        endpoint,
-                        json=json,
-                        data=data,
-                        headers=headers,
-                        params=params,
-                        stream=True,
-                    )
-                if 200 <= r.status_code < 399:
-                    with open(tmp_file_path, "wb") as fp:
-                        for chunk in r.iter_content(chunk_size=10 * 1024 * 1024):
-                            fp.write(chunk)
-                    return RetVal(phantom.APP_SUCCESS, tmp_file_path)
-                self.debug_print(
-                    "Error while downloading file. StatusCode: {}, text: {}".format(
-                        r.status_code, r.text
-                    )
-                )
-            else:
-                # Prepare common request kwargs
-                request_kwargs = {
-                    "json": json,
-                    "data": data,
-                    "headers": headers,
-                    "verify": verify,
-                    "params": params,
-                    "timeout": self._timeout,
-                }
+            response = request_func(endpoint, **request_kwargs)
 
-                if auth:
-                    request_kwargs["auth"] = HTTPBasicAuth(
-                        self._api_key, self._key_secret
-                    )
+            return self._process_response(response, action_result)
 
-                r = request_func(endpoint, **request_kwargs)
         except Exception as e:
             error_message = self._get_error_message_from_exception(e)
             return RetVal(
@@ -199,10 +159,8 @@ class UmbrellaV2Connector(BaseConnector):
                     phantom.APP_ERROR,
                     "Error Connecting to server. Details: {0}".format(error_message),
                 ),
-                resp_json,
+                None,
             )
-
-        return self._process_response(r, action_result)
 
     def _get_token(self, action_result):
         """This function is used to get a token via REST Call.
@@ -226,9 +184,34 @@ class UmbrellaV2Connector(BaseConnector):
 
         self._access_token = resp_json[consts.HTTP_JSON_ACCESS_TOKEN]
 
+        # Calculate token expiry time (current time + token lifetime)
+        current_time = int(time.time())
+        expires_in = resp_json.get("expires_in", consts.UMBRELLA_ACCESS_TOKEN_EXPIRY)
+        self._token_expiry_time = current_time + expires_in
+
+        # Store token and expiry time in state
+        self._state["access_token"] = self._access_token
+        self._state["token_expiry_time"] = self._token_expiry_time
+
         return action_result.set_status(
             phantom.APP_SUCCESS, "Successfully fetched access token"
         )
+
+    def encrypt_state(self, encrypt_var, token_name):
+        """Handle encryption of token.
+        :param encrypt_var: Variable needs to be encrypted
+        :return: encrypted variable
+        """
+        self.debug_print(consts.UMBRELLA_ENCRYPT_TOKEN.format(token_name))  # nosemgrep
+        return encryption_helper.encrypt(encrypt_var, self.get_asset_id())
+
+    def decrypt_state(self, decrypt_var, token_name):
+        """Handle decryption of token.
+        :param decrypt_var: Variable needs to be decrypted
+        :return: decrypted variable
+        """
+        self.debug_print(consts.UMBRELLA_DECRYPT_TOKEN.format(token_name))  # nosemgrep
+        return encryption_helper.decrypt(decrypt_var, self.get_asset_id())
 
     def _process_empty_response(self, response, action_result):
         if response.status_code == 200:
@@ -326,92 +309,93 @@ class UmbrellaV2Connector(BaseConnector):
 
         return RetVal(action_result.set_status(phantom.APP_ERROR, message), None)
 
-    def _make_rest_call_helper(
-        self,
-        endpoint,
-        action_result,
-        verify=True,
-        headers=None,
-        params=None,
-        data=None,
-        json=None,
-        method="get",
-        download=False,
-        next_link=None,
-        is_force=False,
-    ):
-        """Function that helps to set a REST call to the app.
-        :param endpoint: REST endpoint that needs to appended to the service address
-        :param action_result: object of ActionResult class
-        :param verify: verify server certificate (Default True)
-        :param headers: request headers
-        :param params: request parameters
-        :param data: request body
-        :param json: JSON object
-        :param method: GET/POST/PUT/DELETE/PATCH (Default will be GET)
-        :param download: use streaming for the file download to handle large files
-        :param next_link: used for pagination, next_link is returned in the API response
-        :param is_force: ignore the token available in the state file
-        :return: status phantom.APP_ERROR/phantom.APP_SUCCESS(along with appropriate message),
-        response obtained by making an API call
-        """
+    def _make_rest_call_helper(self, endpoint, action_result, params=None, **kwargs):
+        """Helper function for making authenticated REST calls to the Umbrella API.
 
+        Args:
+            endpoint: API endpoint (will be appended to base URL)
+            action_result: ActionResult object for status tracking
+            params: Request parameters (optional)
+            **kwargs: Additional parameters for rare cases
+
+        Returns:
+            Tuple: (status, response_data)
+        """
+        # Ensure we have a valid token
+        if not self._access_token or self._is_token_expired():
+            self.save_progress("Generating access token")
+            ret_val = self._get_token(action_result)
+            if phantom.is_fail(ret_val):
+                return action_result.get_status(), None
+
+        # Prepare headers with authentication
+        request_headers = {
+            "Authorization": f"Bearer {self._access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+        # Construct full URL
         url = f"{self._base_url}{endpoint}"
 
-        if headers is None:
-            headers = {}
+        # Prepare call arguments
+        call_kwargs = {"headers": request_headers}
+        if params:
+            call_kwargs["params"] = params
 
-        if not self._access_token or is_force:
-            self.save_progress("Generating a token")
-            ret_val = self._get_token(action_result)
-
-            if phantom.is_fail(ret_val):
-                return action_result.get_status(), None
-
-        # Add authentication and content headers
-        headers.update(
-            {
-                "Authorization": f"Bearer {self._access_token}",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            }
-        )
+        # Add any additional kwargs (for rare cases)
+        call_kwargs.update(kwargs)
 
         self.save_progress(f"Connecting to endpoint {endpoint}")
-        ret_val, resp_json = self._make_rest_call(
-            url, action_result, verify, headers, params, data, json, method, download
-        )
+        ret_val, resp_json = self._make_rest_call(url, action_result, **call_kwargs)
 
-        # Handle token expiration by retrying with new token
-        message = action_result.get_message()
-        self.debug_print(f"API response message: {message}")
-
-        if message and ("Access" in message and "Forbidden" in message):
+        # Handle token expiration with retry
+        if phantom.is_fail(ret_val) and self._is_token_error(
+            action_result.get_message()
+        ):
             self.save_progress("Token expired, generating new token")
             ret_val = self._get_token(action_result)
-
             if phantom.is_fail(ret_val):
                 return action_result.get_status(), None
 
-            headers.update({"Authorization": f"Bearer {self._access_token}"})
-
-            self.save_progress("Connecting to endpoint {}".format(endpoint))
-            ret_val, resp_json = self._make_rest_call(
-                url,
-                action_result,
-                verify,
-                headers,
-                params,
-                data,
-                json,
-                method,
-                download,
-            )
+            # Update authorization header and retry
+            request_headers["Authorization"] = f"Bearer {self._access_token}"
+            call_kwargs["headers"] = request_headers
+            self.save_progress(f"Retrying connection to endpoint {endpoint}")
+            ret_val, resp_json = self._make_rest_call(url, action_result, **call_kwargs)
 
         if phantom.is_fail(ret_val):
             return action_result.get_status(), None
 
         return phantom.APP_SUCCESS, resp_json
+
+    def _is_token_error(self, error_message):
+        """Check if the error message indicates a token-related issue.
+
+        Args:
+            error_message: Error message from API response
+
+        Returns:
+            bool: True if error is token-related
+        """
+        if not error_message:
+            return False
+
+        token_error_indicators = [
+            "Access",
+            "Forbidden",
+            "Unauthorized",
+            "401",
+            "403",
+            "token",
+            "authentication",
+            "expired",
+        ]
+
+        error_lower = error_message.lower()
+        return any(
+            indicator.lower() in error_lower for indicator in token_error_indicators
+        )
 
     def _handle_test_connectivity(self, param):
         # Add an action result object to self (BaseConnector) to represent the action for this param
@@ -420,9 +404,11 @@ class UmbrellaV2Connector(BaseConnector):
         self.save_progress("Testing connectivity to Cisco Umbrella API")
 
         # Test API connectivity by fetching destination lists
-        ret_val, response = self._make_rest_call_helper(
-            consts.UMBRELLA_POLICIES_DESTINATION_LISTS,
+        ret_val, response = self.__get_paginated_data(
             action_result,
+            consts.UMBRELLA_POLICIES_DESTINATION_LISTS,
+            limit=1,
+            error_msg="Failed to get lists",
         )
 
         if phantom.is_fail(ret_val):
@@ -445,36 +431,39 @@ class UmbrellaV2Connector(BaseConnector):
 
         action_result = self.add_action_result(ActionResult(dict(param)))
 
-        # Fetch destination lists from API
-        ret_val, response = self._make_rest_call_helper(
-            consts.UMBRELLA_POLICIES_DESTINATION_LISTS, action_result
-        )
+        limit = param.get("limit")
 
+        ret_val, data = self.__get_paginated_data(
+            action_result,
+            consts.UMBRELLA_POLICIES_DESTINATION_LISTS,
+            limit=limit,
+            error_msg="Failed to get lists",
+        )
         if phantom.is_fail(ret_val):
             return action_result.get_status()
 
         # Add response data to action result
-        action_result.add_data(response.get("data", []))
-        action_result.update_summary({"total_lists": len(response.get("data", []))})
+        for val in data:
+            action_result.add_data(val)
+        action_result.update_summary({"total_lists": len(data)})
 
         return action_result.set_status(phantom.APP_SUCCESS)
 
-    def __get_destinations(self, action_result, list_id):
-        """Get all destinations from a specific destination list with caching.
+    def __get_paginated_data(
+        self, action_result, endpoint, limit=None, error_msg="Failed to fetch data"
+    ):
+        """Get paginated data from API with optional user-specified limit.
 
         Args:
             action_result: ActionResult object for status tracking
-            list_id: ID of the destination list
+            endpoint: API endpoint to call
+            limit: Optional user-specified limit for results
+            error_msg: Custom error message for failures
 
         Returns:
-            Union[List[Dict], int]: List of destinations or error status
+            Tuple[int, List[Dict]]: Status and list of data items
         """
-
-        endpoint = consts.UMBRELLA_POLICIES_DESTINATION_LIST_DESTINATIONS.format(
-            destinationListId=list_id
-        )
-
-        page_size = 100  # max supported
+        page_size = min(limit, 100) if limit else 100  # API max is 100
         ret_val, response = self._make_rest_call_helper(
             endpoint,
             action_result,
@@ -482,25 +471,32 @@ class UmbrellaV2Connector(BaseConnector):
         )
 
         if phantom.is_fail(ret_val) or not response:
-            return action_result.set_status(
-                phantom.APP_ERROR, "Failed to get destinations"
-            )
+            return action_result.set_status(phantom.APP_ERROR, error_msg), []
 
         if response.get("status", {}).get("code") != 200:
             return action_result.set_status(
-                phantom.APP_ERROR, "API returned non-200 status"
-            )
+                phantom.APP_ERROR, response.get("error", error_msg)
+            ), []
 
         data = list(response.get("data", []))
         total_items = response.get("meta", {}).get("total", 0)
 
-        # Optimized pagination with concurrent requests if needed
-        if total_items > page_size:
-            remaining_pages = [(total_items - 1) // page_size]
-            self.debug_print(f"Fetching {remaining_pages[0]} additional pages")
+        # If user specified a limit and we have enough data, return early
+        if limit and len(data) >= limit:
+            return phantom.APP_SUCCESS, data[:limit]
 
-            # Sequential pagination (can be made concurrent if needed)
-            for page in range(2, remaining_pages[0] + 2):
+        # Calculate how many more items we need
+        items_needed = limit - len(data) if limit else total_items - len(data)
+
+        # Continue pagination if we need more data
+        if items_needed > 0 and total_items > page_size:
+            remaining_pages = min(
+                (total_items - 1) // page_size,
+                (items_needed + page_size - 1) // page_size,  # Round up division
+            )
+            self.debug_print(f"Fetching {remaining_pages} additional pages")
+
+            for page in range(2, remaining_pages + 2):
                 ret_val, page_response = self._make_rest_call_helper(
                     endpoint,
                     action_result,
@@ -510,10 +506,16 @@ class UmbrellaV2Connector(BaseConnector):
                 if phantom.is_success(ret_val) and page_response:
                     page_data = page_response.get("data", [])
                     data.extend(page_data)
+                    items_needed -= len(page_data)
 
-                    # Early termination if we got all items
-                    if len(data) >= total_items:
+                    # Early termination if we have enough items
+                    if items_needed <= 0:
                         break
+
+        # Apply final limit if specified
+        if limit:
+            data = data[:limit]
+
         return phantom.APP_SUCCESS, data
 
     def _handle_get_destinations(self, param):
@@ -531,33 +533,41 @@ class UmbrellaV2Connector(BaseConnector):
 
         list_id = param["list_id"]
         search_value = param.get("search_value", "")
+        limit = param.get("limit")
 
         # Get destinations from the list
-        ret_val, data = self.__get_destinations(action_result, list_id)
-
+        ret_val, data = self.__get_paginated_data(
+            action_result,
+            consts.UMBRELLA_POLICIES_DESTINATION_LIST_DESTINATIONS.format(
+                destinationListId=list_id
+            ),
+            limit=limit,
+            error_msg="Failed to get destinations",
+        )
         if phantom.is_fail(ret_val):
             return action_result.get_status()
 
         # Optimized filtering with early termination and better search
         if search_value:
             search_lower = search_value.lower()
-            filtered_results = []
+            matches_found = 0
 
             # Optimized search with generator expression
             for row in data:
                 if any(search_lower in str(value).lower() for value in row.values()):
-                    filtered_results.append(row)
+                    action_result.add_data(row)
+                    matches_found += 1
 
-            action_result.add_data(filtered_results)
             action_result.update_summary(
                 {
                     "search_value": search_value,
-                    "matches_found": len(filtered_results),
+                    "matches_found": matches_found,
                     "total_destinations": len(data),
                 }
             )
         else:
-            action_result.add_data(data)
+            for val in data:
+                action_result.add_data(val)
             action_result.update_summary({"total_destinations": len(data)})
 
         return action_result.set_status(phantom.APP_SUCCESS)
@@ -581,11 +591,16 @@ class UmbrellaV2Connector(BaseConnector):
             "get_destinations": self._handle_get_destinations,
         }
 
-        if action_id in list(action_mapping.keys()):
+        if action_id in action_mapping:
             action_function = action_mapping[action_id]
-            action_execution_status = action_function(param)
+            return action_function(param)
+        else:
+            return self.set_status(
+                phantom.APP_ERROR, f"Unsupported action: {action_id}"
+            )
 
-        return action_execution_status
+    def _reset_state(self):
+        self._state = {"app_version": self.get_app_json().get("app_version")}
 
     def initialize(self) -> int:
         """Initialize the connector with configuration and state.
@@ -596,6 +611,14 @@ class UmbrellaV2Connector(BaseConnector):
 
         # Get asset configuration
         config = self.get_config()
+
+        self._state = self.load_state()
+        if not isinstance(self._state, dict):
+            self.debug_print("Resetting the state file with the default format")
+            self._reset_state()
+            return self.set_status(
+                phantom.APP_ERROR, consts.UMBRELLA_STATE_FILE_CORRUPT_ERROR
+            )
 
         # Validate required configuration
         self._api_key = config.get("api_key")
@@ -610,6 +633,59 @@ class UmbrellaV2Connector(BaseConnector):
         self._oauth_token_url = self._base_url + consts.OAUTH_TOKEN_URI
         self._timeout = consts.DEFAULT_REQUEST_TIMEOUT
 
+        if self.get_action_identifier() == "test_connectivity":
+            return phantom.APP_SUCCESS
+
+        # Load existing token from state if available
+        self._load_token_from_state()
+
+        return phantom.APP_SUCCESS
+
+    def _is_token_expired(self):
+        """Check if the current access token is expired or about to expire.
+
+        Returns:
+            bool: True if token is expired or about to expire, False otherwise
+        """
+        if not self._token_expiry_time:
+            return True
+
+        current_time = int(time.time())
+        # Add buffer time to refresh token before it actually expires
+        return current_time >= (
+            self._token_expiry_time - consts.UMBRELLA_TOKEN_EXPIRY_BUFFER
+        )
+
+    def _load_token_from_state(self):
+        try:
+            if self._state.get(consts.UMBRELLA_STATE_IS_ENCRYPTED):
+                encrypted_token = self._state.get("access_token")
+                if encrypted_token:
+                    self._access_token = self.decrypt_state(encrypted_token, "access")
+                    self._token_expiry_time = self._state.get("token_expiry_time")
+        except Exception as e:
+            self.debug_print(
+                f"{consts.UMBRELLA_DECRYPTION_ERROR}: {self._get_error_message_from_exception(e)}"
+            )
+            # Clear corrupted token data
+            self._reset_state()
+
+    def finalize(self):
+        try:
+            if self._access_token:
+                self._state["access_token"] = self.encrypt_state(
+                    self._access_token, "access"
+                )
+                self._state["token_expiry_time"] = self._token_expiry_time
+
+            self._state[consts.UMBRELLA_STATE_IS_ENCRYPTED] = True
+        except Exception as e:
+            self.error_print(
+                f"{consts.UMBRELLA_ENCRYPTION_ERROR}: {self._get_error_message_from_exception(e)}"
+            )
+            return self.set_status(phantom.APP_ERROR, consts.UMBRELLA_ENCRYPTION_ERROR)
+
+        self.save_state(self._state)
         return phantom.APP_SUCCESS
 
 

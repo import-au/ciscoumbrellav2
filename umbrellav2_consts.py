@@ -22,6 +22,22 @@ UMBRELLA_ERROR_MSG = (
     "Unknown error occurred. Please check the asset configuration "
     "and/or action parameters"
 )
+UMBRELLA_STATE_FILE_CORRUPT_ERROR = (
+    "Error occurred while loading the state file due to its unexpected format. "
+    "Resetting the state file with the default format. Please try again."
+)
+
+UMBRELLA_STATE_IS_ENCRYPTED = "is_encrypted"
+
+# Token management constants
+UMBRELLA_TOKEN_EXPIRY_BUFFER = 300  # 5 minutes buffer before actual expiry
+UMBRELLA_ACCESS_TOKEN_EXPIRY = 3600  # 1 hour in seconds
+
+# Encryption and decryption messages
+UMBRELLA_ENCRYPT_TOKEN = "Encrypting the {} token"
+UMBRELLA_DECRYPT_TOKEN = "Decrypting the {} token"
+UMBRELLA_ENCRYPTION_ERROR = "Error occurred while encrypting the state file"
+UMBRELLA_DECRYPTION_ERROR = "Error occurred while decrypting the state file"
 
 # API Base URL and Endpoints
 UMBRELLA_BASE_URL = "https://api.umbrella.com"

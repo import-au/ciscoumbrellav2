@@ -1,6 +1,6 @@
 {
     "appid": "1f90d598-9e22-4121-99a7-e05f7a01bb26",
-    "name": "Umbrella v2",
+    "name": "Cisco Umbrella v2",
     "description": "The Umbrella API was released in September 2022, providing a user-friendly and secure platform that enables users to build on, extend, and integrate with Umbrella. It facilitates the creation of multiple cross-platform workflows aggregating our market-leading threat intelligence with other security solutions to expand security enforcement, broaden visibility, and automate incident response",
     "type": "network security",
     "product_vendor": "Cisco",
@@ -10,9 +10,9 @@
     "python_version": "3.9, 3.13",
     "product_version_regex": ".*",
     "publisher": "Splunk",
-    "license": "Copyright (c) Community, 2024-2025",
-    "app_version": "3.4.0",
-    "utctime_updated": "2024-10-29T19:16:46.678789Z",
+    "license": "Copyright (c) 2025 Splunk Inc.",
+    "app_version": "1.0.0",
+    "utctime_updated": "2025-09-17T19:16:46.678789Z",
     "package_name": "phantom_umbrellav2",
     "main_module": "umbrellav2_connector.py",
     "min_phantom_version": "6.4.0",
@@ -46,43 +46,129 @@
             "action": "get lists",
             "identifier": "get_lists",
             "description": "Get all the destination lists in your organization",
-            "type": "generic",
+            "type": "investigate",
             "read_only": true,
-            "parameters": {},
+            "parameters": {
+                "limit": {
+                    "description": "Optional limit for number of results default all",
+                    "data_type": "numeric",
+                    "order": 0
+                }
+            },
             "output": [
                 {
                     "data_path": "action_result.status",
                     "data_type": "string",
-                    "column_name": "Status",
-                    "column_order": 0,
                     "example_values": [
                         "success",
                         "failed"
                     ]
                 },
                 {
+                    "data_path": "action_result.parameter.limit",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.access",
+                    "data_type": "string",
+                    "column_name": "Access",
+                    "column_order": 3
+                },
+                {
+                    "data_path": "action_result.data.*.bundleTypeId",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.createdAt",
+                    "data_type": "numeric"
+                },
+                {
                     "data_path": "action_result.data.*.id",
                     "data_type": "numeric",
                     "column_name": "ID",
-                    "column_order": 1
+                    "column_order": 0,
+                    "contains": [
+                        "cisco umbrella destination list id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data.*.isGlobal",
+                    "data_type": "boolean",
+                    "column_name": "Is Global",
+                    "column_order": 2
+                },
+                {
+                    "data_path": "action_result.data.*.isMspDefault",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.data.*.markedForDeletion",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.data.*.meta.applicationCount",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.meta.destinationCount",
+                    "data_type": "numeric",
+                    "column_name": "Destination Count",
+                    "column_order": 4
+                },
+                {
+                    "data_path": "action_result.data.*.meta.domainCount",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.meta.ipv4Count",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.meta.urlCount",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.modifiedAt",
+                    "data_type": "numeric"
                 },
                 {
                     "data_path": "action_result.data.*.name",
                     "data_type": "string",
                     "column_name": "Name",
-                    "column_order": 2
+                    "column_order": 1
                 },
                 {
-                    "data_path": "action_result.message",
+                    "data_path": "action_result.data.*.organizationId",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.thirdpartyCategoryId",
                     "data_type": "string"
                 },
                 {
-                    "data_path": "summary.total_objects",
+                    "data_path": "action_result.summary.total_lists",
                     "data_type": "numeric"
                 },
                 {
+                    "data_path": "action_result.message",
+                    "data_type": "string",
+                    "example_values": [
+                        "Total lists: 5"
+                    ]
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric",
+                    "example_values": [
+                        1
+                    ]
+                },
+                {
                     "data_path": "summary.total_objects_successful",
-                    "data_type": "numeric"
+                    "data_type": "numeric",
+                    "example_values": [
+                        1
+                    ]
                 }
             ],
             "render": {
@@ -94,60 +180,30 @@
             "action": "get destinations",
             "identifier": "get_destinations",
             "description": "Get destinations in a destination list",
-            "type": "generic",
+            "type": "investigate",
             "read_only": true,
             "parameters": {
                 "list_id": {
                     "description": "The unique ID of the destination list",
                     "data_type": "numeric",
                     "required": true,
-                    "order": 0
+                    "order": 0,
+                    "contains": [
+                        "cisco umbrella destination list id"
+                    ]
                 },
                 "search_value": {
                     "description": "Optional value to search for in the list",
                     "data_type": "string",
                     "order": 1
+                },
+                "limit": {
+                    "description": "Optional limit for number of results default all",
+                    "data_type": "numeric",
+                    "order": 2
                 }
             },
             "output": [
-                {
-                    "data_path": "action_result.data.*.id",
-                    "data_type": "numeric",
-                    "column_name": "ID",
-                    "column_order": 0
-                },
-                {
-                    "data_path": "action_result.data.*.type",
-                    "data_type": "string",
-                    "column_name": "Type",
-                    "column_order": 1
-                },
-                {
-                    "data_path": "action_result.data.*.comment",
-                    "data_type": "string",
-                    "column_name": "Comment",
-                    "column_order": 2
-                },
-                {
-                    "data_path": "action_result.data.*.destination",
-                    "data_type": "string",
-                    "column_name": "Destination",
-                    "column_order": 3
-                },
-                {
-                    "data_path": "action_result.data.*.createdAt",
-                    "data_type": "string",
-                    "column_name": "Create Date",
-                    "column_order": 4
-                },
-                {
-                    "data_path": "action_result.parameter.list_id",
-                    "data_type": "numeric"
-                },
-                {
-                    "data_path": "action_result.parameter.search_value",
-                    "data_type": "string"
-                },
                 {
                     "data_path": "action_result.status",
                     "data_type": "string",
@@ -157,16 +213,104 @@
                     ]
                 },
                 {
-                    "data_path": "action_result.message",
+                    "data_path": "action_result.parameter.limit",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.parameter.list_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "cisco umbrella destination list id"
+                    ],
+                    "example_values": [
+                        "18474698"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.search_value",
+                    "data_type": "string",
+                    "example_values": [
+                        "test"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data",
                     "data_type": "string"
                 },
                 {
-                    "data_path": "summary.total_objects",
+                    "data_path": "action_result.data.*.comment",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.createdAt",
+                    "data_type": "string",
+                    "example_values": [
+                        "2025-09-12 12:31:30"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data.*.destination",
+                    "data_type": "string",
+                    "column_name": "Destination",
+                    "column_order": 2,
+                    "example_values": [
+                        "www.whatsapp.com"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data.*.id",
+                    "data_type": "string",
+                    "column_name": "ID",
+                    "column_order": 0,
+                    "example_values": [
+                        "3534477"
+                    ],
+                    "contains": [
+                        "cisco umbrella destination id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data.*.type",
+                    "data_type": "string",
+                    "column_name": "Type",
+                    "column_order": 1,
+                    "example_values": [
+                        "domain"
+                    ]
+                },
+                {
+                    "data_path": "action_result.summary.matches_found",
                     "data_type": "numeric"
                 },
                 {
-                    "data_path": "summary.total_objects_successful",
+                    "data_path": "action_result.summary.search_value",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.summary.total_destinations",
                     "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string",
+                    "example_values": [
+                        "Search value: hotstar, Matches found: 1, Total destinations: 2",
+                        "Total destinations: 2"
+                    ]
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric",
+                    "example_values": [
+                        1
+                    ]
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric",
+                    "example_values": [
+                        1
+                    ]
                 }
             ],
             "render": {
