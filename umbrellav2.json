@@ -16,6 +16,7 @@
     "package_name": "phantom_umbrellav2",
     "main_module": "umbrellav2_connector.py",
     "min_phantom_version": "6.4.0",
+    "fips_compliant": true,
     "app_wizard_version": "1.0.0",
     "configuration": {
         "api_key": {
